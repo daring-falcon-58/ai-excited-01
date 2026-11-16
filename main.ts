@@ -1,42 +1,50 @@
-// ai-excited-01 — "The Paper Crane That Caught Fire"
-//
-// A make.fun bounty entry (program/v1, Node 22, standard library only).
-// The entry image lives in this repository as entry.png; this program
-// copies it, byte for byte, to the harness output directory. There is
-// no network access, no randomness, and no image processing at run
-// time, so two runs always produce identical bytes.
+// The Paper Crane That Caught Fire — ai-excited-01 entry.
+// Deterministically writes the bundled image to the output directory
+// as entry.png. No network, no randomness, no dependencies beyond the
+// Node 22 standard library: the same input bytes always produce the
+// same output bytes, so repeated runs are byte-identical.
 
-import { copyFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = dirname(fileURLToPath(import.meta.url));
-const sourcePath = join(repoRoot, "entry.png");
+const here = dirname(fileURLToPath(import.meta.url));
+const sourcePath = join(here, "entry.png");
 
-const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
+const outputDir = process.env.MAKEFUN_OUTPUT_DIR || "/output";
 const targetPath = join(outputDir, "entry.png");
 
 mkdirSync(outputDir, { recursive: true });
+
+// Guard: refuse to emit an empty image instead of failing silently.
+const sourceBytes = readFileSync(sourcePath);
+if (sourceBytes.length === 0) {
+  throw new Error(`entry image is empty: ${sourcePath}`);
+}
+
 copyFileSync(sourcePath, targetPath);
 
-// Sanity check: the copy must be exactly the same size as the source.
-// If anything truncated or altered the file, fail loudly instead of
-// handing the judge a corrupted image.
-const sourceSize = statSync(sourcePath).size;
-const targetSize = statSync(targetPath).size;
-if (sourceSize !== targetSize) {
+// Sanity check: the written file must match the bundled image exactly.
+const expected = sourceBytes;
+const written = readFileSync(targetPath);
+
+if (expected.length !== written.length) {
   throw new Error(
-    `entry.png size mismatch after copy: source ${sourceSize} bytes, ` +
-      `output ${targetSize} bytes`,
+    `size mismatch: wrote ${written.length} bytes, expected ${expected.length}`,
   );
 }
 
-// Stronger check: compare the actual bytes, not just the sizes, so a
-// same-length corruption can never slip through unnoticed.
-const sourceBytes = readFileSync(sourcePath);
-const targetBytes = readFileSync(targetPath);
-if (!sourceBytes.equals(targetBytes)) {
-  throw new Error("entry.png bytes differ after copy; refusing to continue.");
+if (!expected.equals(written)) {
+  throw new Error("byte mismatch: output is not identical to entry.png");
 }
 
-console.log(`Wrote ${targetPath} (${targetSize} bytes).`);
+const digest = (bytes: Buffer) =>
+  createHash("sha256").update(bytes).digest("hex");
+
+if (digest(expected) !== digest(written)) {
+  throw new Error("hash mismatch: output hash differs from entry.png");
+}
+
+console.log(`wrote ${targetPath} (${written.length} bytes)`);
+console.log(`sha256 ${digest(written)}`);
